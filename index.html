@@ -1,0 +1,600 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#0f1216" />
+  <title>Power Link</title>
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+</head>
+  <body>
+    <canvas id="particles" aria-hidden="true"></canvas>
+    <header class="shell" id="mainHeader" style="display: none;">
+      <div class="topbar">
+        <div class="brand">
+          <img src="logopowerlink.png" alt="Power Link" class="logo-img" onerror="this.style.display='none'" />
+          <span class="brand-text">Power Link</span>
+        </div>
+        <div class="top-actions">
+          <div id="scheduleNotification" class="schedule-notification" style="display: none;">
+            <span class="notification-icon">🔔</span>
+            <span id="scheduleNotificationText" class="notification-text"></span>
+          </div>
+          <div id="connStatus" class="status status--disconnected">MQTT: desconectado</div>
+        </div>
+      </div>
+      <div class="subbar">
+        <div class="pill">Broker <span class="dot"></span> HiveMQ</div>
+        <nav class="tabs">
+          <button id="tabControl" class="tab-btn active">Controle</button>
+          <button id="tabAutomation" class="tab-btn">Automação</button>
+        </nav>
+      </div>
+    </header>
+
+    <!-- Página de Login (Página Inicial) -->
+    <div id="loginPage" class="login-page">
+      <div class="login-container">
+        <div class="login-brand">
+          <img src="logopowerlink.png" alt="Power Link" class="login-logo" onerror="this.style.display='none'" />
+          <h1 class="login-title">Power Link</h1>
+        </div>
+        <div class="login-panel">
+          <div class="login-panel-body">
+            <div id="loginView">
+              <div class="stack">
+                <label class="label">Chave de Acesso</label>
+                <input id="accessKey" type="password" class="input" placeholder="Digite sua chave de acesso" />
+              </div>
+              <div class="control-row">
+                <button id="btnLogin" class="btn">Entrar</button>
+              </div>
+              <div id="loginError" class="error-message" style="display: none;"></div>
+            </div>
+            <div id="masterView" style="display: none;">
+              <div class="stack">
+                <label class="label">Gerar Chave de Acesso</label>
+                <div class="grid-2">
+                  <select id="keyType" class="input">
+                    <option value="user">Usuário Comum (5 minutos)</option>
+                    <option value="master">Usuário Mestre (sem limite)</option>
+                  </select>
+                  <button id="btnGenerateKey" class="btn">Gerar</button>
+                </div>
+                <input id="generatedKey" type="text" class="input" readonly placeholder="Chave gerada aparecerá aqui" />
+              </div>
+              <div class="control-row" style="margin-top: 16px;">
+                <button id="btnLogout" class="btn btn--secondary">Sair</button>
+              </div>
+            </div>
+            <div id="userView" style="display: none;">
+              <div class="stack">
+                <div class="state">Acesso temporário ativo</div>
+                <div class="state">Tempo restante: <span id="timeRemaining">--:--</span></div>
+              </div>
+              <div class="control-row" style="margin-top: 16px;">
+                <button id="btnUserLogout" class="btn btn--secondary">Sair</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <main class="container" id="mainContent" style="display: none;">
+      <!-- Página de Controle -->
+      <div id="controlPage" class="page-content">
+
+      <section class="panel">
+        <div class="panel-head">
+          <div class="icon"></div>
+          <h2>Subwoofer</h2>
+        </div>
+        <div class="panel-body">
+          <div class="control-row">
+            <label class="toggle">
+              <input id="toggleSubwoofer" type="checkbox" />
+              <span class="slider"></span>
+              <span class="toggle-label">ON/OFF</span>
+            </label>
+          </div>
+          <div class="state">Estado: <span id="stateSubwoofer">?</span></div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <div class="icon"></div>
+          <h2>Speaker Esquerdo</h2>
+        </div>
+        <div class="panel-body">
+          <div class="control-row">
+            <label class="toggle">
+              <input id="toggleSpeakerEsq" type="checkbox" />
+              <span class="slider"></span>
+              <span class="toggle-label">ON/OFF</span>
+            </label>
+          </div>
+          <div class="state">Estado: <span id="stateSpeakerEsq">?</span></div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <div class="icon"></div>
+          <h2>Speaker Direito</h2>
+        </div>
+        <div class="panel-body">
+          <div class="control-row">
+            <label class="toggle">
+              <input id="toggleSpeakerDir" type="checkbox" />
+              <span class="slider"></span>
+              <span class="toggle-label">ON/OFF</span>
+            </label>
+          </div>
+          <div class="state">Estado: <span id="stateSpeakerDir">?</span></div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <div class="icon"></div>
+          <h2>Sala</h2>
+        </div>
+        <div class="panel-body">
+          <div class="control-row">
+            <label class="toggle">
+              <input id="toggleSala" type="checkbox" />
+              <span class="slider"></span>
+              <span class="toggle-label">ON/OFF</span>
+            </label>
+          </div>
+          <div class="state">Estado: <span id="stateSala">?</span></div>
+        </div>
+      </section>
+
+      <section class="panel panel-led">
+        <div class="panel-head">
+          <div class="icon"></div>
+          <h2>Fita de LED</h2>
+        </div>
+        <div class="panel-body">
+          <div class="preview">
+            <div class="preview-bar" id="ledPreview" title="Clique para escolher a cor"></div>
+          </div>
+          <div>
+            <label class="label">Modo</label>
+            <select id="ledMode" class="input">
+              <option value="solid">Sólido</option>
+              <option value="rainbow">Arco-íris</option>
+              <option value="off">Desligado</option>
+            </select>
+          </div>
+          <input id="ledColor" type="color" style="display: none;" value="#FFFFFF" />
+          <div class="stack">
+            <label class="label">Brilho: <span id="briVal">128</span></label>
+            <input id="ledBri" type="range" min="0" max="255" value="128" />
+          </div>
+          <div class="control-row">
+            <button id="btnLedSend" class="btn">Aplicar</button>
+          </div>
+          <div class="state state-grid">
+            <div>Modo: <span id="ledModeState">-</span></div>
+            <div>Cor: <span id="ledColorState">#FFFFFF</span> <span id="ledSwatch" class="swatch" aria-label="Prévia de cor"></span></div>
+            <div>Brilho: <span id="ledBriState">128</span></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Painel de Geração de Chaves (Apenas Master) -->
+      <section class="panel" id="keyGenerationPanel" style="display: none;">
+        <div class="panel-head">
+          <div class="icon"></div>
+          <h2>Geração de Chaves</h2>
+        </div>
+        <div class="panel-body">
+          <div class="stack">
+            <label class="label">Tipo de Chave</label>
+            <select id="controlKeyType" class="input">
+              <option value="master">Chave Mestre (sem limite)</option>
+              <option value="guest">Chave de Convidado (2 minutos)</option>
+            </select>
+          </div>
+          <div class="control-row" style="margin-top: 16px;">
+            <button id="btnGenerateControlKey" class="btn">Gerar Chave</button>
+          </div>
+          <div class="stack" style="margin-top: 16px;">
+            <label class="label">Chave Gerada</label>
+            <input id="controlGeneratedKey" type="text" class="input" readonly placeholder="Chave gerada aparecerá aqui" />
+          </div>
+          <div class="state" id="controlKeyStatus" style="margin-top: 12px; display: none;"></div>
+        </div>
+      </section>
+
+      <!-- Painel de Monitoramento do Sistema -->
+      <section class="panel panel-system">
+        <div class="panel-head">
+          <div class="icon"></div>
+          <h2>Monitoramento do Sistema</h2>
+        </div>
+        <div class="panel-body">
+          <div class="system-monitor">
+            <!-- CPU -->
+            <div class="system-item">
+              <div class="system-item-header">
+                <span class="system-label">CPU</span>
+                <span id="systemCpu" class="system-value">0.0%</span>
+              </div>
+              <div class="system-bar">
+                <div id="systemCpuBar" class="system-bar-fill low" style="width: 0%"></div>
+              </div>
+            </div>
+
+            <!-- RAM -->
+            <div class="system-item">
+              <div class="system-item-header">
+                <span class="system-label">RAM</span>
+                <span id="systemRam" class="system-value">0.0%</span>
+              </div>
+              <div class="system-bar">
+                <div id="systemRamBar" class="system-bar-fill low" style="width: 0%"></div>
+              </div>
+            </div>
+
+            <div class="system-footer">
+              <span id="systemLastUpdate" class="system-update">Aguardando dados...</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel" id="logsPanel" style="display: none;">
+        <div class="panel-head">
+          <div class="icon"></div>
+          <h2>Histórico de Logs</h2>
+        </div>
+        <div class="panel-body">
+          <div class="stack" style="margin-bottom: 12px;">
+            <button id="btnExportLogs" class="btn btn-small">📥 Exportar Logs (CSV)</button>
+          </div>
+          <div id="logsContainer" class="logs-container"></div>
+        </div>
+      </section>
+
+      <!-- Painel de Switches Físicos -->
+      <section class="panel panel-switches">
+        <div class="panel-head">
+          <div class="icon"></div>
+          <h2>Switches Físicos</h2>
+        </div>
+        <div class="panel-body">
+          <div class="switches-grid">
+            <!-- Switch 1: Subwoofer -->
+            <div class="switch-item">
+              <div class="switch-header">
+                <span class="switch-label">Switch 1 - Subwoofer</span>
+                <span id="switch1Status" class="state state-off">Desligado</span>
+              </div>
+            </div>
+
+            <!-- Switch 2: Luz da Sala -->
+            <div class="switch-item">
+              <div class="switch-header">
+                <span class="switch-label">Switch 2 - Luz da Sala</span>
+                <span id="switch2Status" class="state state-off">Desligado</span>
+              </div>
+            </div>
+
+            <!-- Switch 3: Speaker Esquerdo -->
+            <div class="switch-item">
+              <div class="switch-header">
+                <span class="switch-label">Switch 3 - Speaker Esquerdo</span>
+                <span id="switch3Status" class="state state-off">Desligado</span>
+              </div>
+            </div>
+
+            <!-- Switch 4: Speaker Direito -->
+            <div class="switch-item">
+              <div class="switch-header">
+                <span class="switch-label">Switch 4 - Speaker Direito</span>
+                <span id="switch4Status" class="state state-off">Desligado</span>
+              </div>
+            </div>
+
+            <!-- Switch 5: Ligar/Desligar Fita LED -->
+            <div class="switch-item">
+              <div class="switch-header">
+                <span class="switch-label">Switch 5 - Fita LED ON/OFF</span>
+                <span id="switch5Status" class="state state-off">Desligado</span>
+              </div>
+            </div>
+
+            <!-- Switch 6: Modo Rainbow Fita LED -->
+            <div class="switch-item">
+              <div class="switch-header">
+                <span class="switch-label">Switch 6 - Fita LED Rainbow</span>
+                <span id="switch6Status" class="state state-off">Desligado</span>
+              </div>
+            </div>
+
+            <!-- Switch 7: Cena 1 -->
+            <div class="switch-item switch-scene">
+              <div class="switch-header">
+                <span class="switch-label">Switch 7 - Cena</span>
+                <span id="switch7Status" class="state state-off">Desligado</span>
+              </div>
+              <div class="stack" style="margin-top: 12px;">
+                <label class="label">Cena Ativada:</label>
+                <select id="switch7Scene" class="input">
+                  <option value="">Nenhuma cena selecionada</option>
+                </select>
+                <button id="btnSaveSwitch7Scene" class="btn btn-small">Salvar Configuração</button>
+              </div>
+            </div>
+
+            <!-- Switch 8: Cena 2 -->
+            <div class="switch-item switch-scene">
+              <div class="switch-header">
+                <span class="switch-label">Switch 8 - Cena</span>
+                <span id="switch8Status" class="state state-off">Desligado</span>
+              </div>
+              <div class="stack" style="margin-top: 12px;">
+                <label class="label">Cena Ativada:</label>
+                <select id="switch8Scene" class="input">
+                  <option value="">Nenhuma cena selecionada</option>
+                </select>
+                <button id="btnSaveSwitch8Scene" class="btn btn-small">Salvar Configuração</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+      </div>
+
+      <!-- Página de Automação -->
+      <div id="automationPage" class="page-content" style="display: none;">
+        <!-- Agendamentos -->
+        <section class="panel">
+          <div class="panel-head">
+            <div class="icon"></div>
+            <h2>Agendamentos</h2>
+          </div>
+          <div class="panel-body">
+            <div class="stack">
+              <button id="btnAddSchedule" class="btn">+ Novo Agendamento</button>
+            </div>
+            <div id="schedulesList" class="schedules-list"></div>
+          </div>
+        </section>
+
+        <!-- Cenas e Rotinas -->
+        <section class="panel">
+          <div class="panel-head">
+            <div class="icon"></div>
+            <h2>Cenas e Rotinas</h2>
+          </div>
+          <div class="panel-body">
+            <div class="stack">
+              <button id="btnAddScene" class="btn">+ Nova Cena</button>
+            </div>
+            <div id="scenesList" class="scenes-list"></div>
+          </div>
+        </section>
+
+        <!-- Bloqueio de Dispositivos -->
+        <section class="panel" id="blockDevicesPanel" style="display: none;">
+          <div class="panel-head">
+            <div class="icon"></div>
+            <h2>Bloqueio de Dispositivos</h2>
+          </div>
+          <div class="panel-body">
+            <div class="stack">
+              <label class="label">Selecione o Dispositivo</label>
+              <select id="blockDeviceSelect" class="input">
+                <option value="">Selecione um dispositivo...</option>
+                <option value="subwoofer">Subwoofer</option>
+                <option value="speaker_esquerdo">Speaker Esquerdo</option>
+                <option value="speaker_direito">Speaker Direito</option>
+                <option value="lampada_sala">Lâmpada Sala</option>
+                <option value="fita_led">Fita LED</option>
+              </select>
+            </div>
+            <div class="stack" id="blockDeviceControls" style="display: none; margin-top: 16px;">
+              <label class="label">Status do Bloqueio</label>
+              <label class="toggle">
+                <input id="toggleBlockDevice" type="checkbox" />
+                <span class="slider"></span>
+                <span class="toggle-label">Bloquear Dispositivo</span>
+              </label>
+              <div class="state" id="blockDeviceStatus" style="margin-top: 8px;"></div>
+            </div>
+          </div>
+        </section>
+
+      </div>
+    </main>
+
+    <footer class="footer" id="mainFooter" style="display: none;">
+      <div> </div>
+    </footer>
+
+    <!-- Modal para Agendamento -->
+    <div id="scheduleModal" class="modal" style="display: none;">
+      <div class="modal-overlay"></div>
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3>Novo Agendamento</h3>
+          <button id="closeScheduleModal" class="modal-close">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="stack">
+            <label class="label">Dispositivo</label>
+            <select id="scheduleDevice" class="input">
+              <option value="fita_led">Fita LED</option>
+              <option value="subwoofer">Subwoofer</option>
+              <option value="speaker_esquerdo">Speaker Esquerdo</option>
+              <option value="speaker_direito">Speaker Direito</option>
+              <option value="lampada_sala">Lâmpada Sala</option>
+            </select>
+          </div>
+          <div class="stack">
+            <label class="label">Ação</label>
+            <select id="scheduleAction" class="input">
+              <option value="on">Ligar</option>
+              <option value="off">Desligar</option>
+            </select>
+          </div>
+          <div class="stack" id="scheduleColorContainer" style="display: none;">
+            <label class="label">Cor da Fita LED</label>
+            <div class="color-picker-inline">
+              <input id="scheduleColor" type="color" class="input-color" value="#FFFFFF" />
+              <input id="scheduleColorHex" type="text" class="input" placeholder="#FFFFFF" maxlength="7" />
+            </div>
+          </div>
+          <div class="stack">
+            <label class="label">Tipo de Agendamento</label>
+            <select id="scheduleType" class="input">
+              <option value="weekly">Recorrente (Dias da Semana)</option>
+              <option value="date">Data Específica</option>
+            </select>
+          </div>
+          <div class="stack" id="scheduleDateContainer" style="display: none;">
+            <label class="label">Data</label>
+            <input id="scheduleDate" type="date" class="input" />
+          </div>
+          <div class="stack" id="scheduleWeekdaysContainer">
+            <label class="label">Dias da Semana</label>
+            <div class="weekdays">
+              <label><input type="checkbox" value="0" /> Dom</label>
+              <label><input type="checkbox" value="1" /> Seg</label>
+              <label><input type="checkbox" value="2" /> Ter</label>
+              <label><input type="checkbox" value="3" /> Qua</label>
+              <label><input type="checkbox" value="4" /> Qui</label>
+              <label><input type="checkbox" value="5" /> Sex</label>
+              <label><input type="checkbox" value="6" /> Sáb</label>
+            </div>
+          </div>
+          <div class="stack">
+            <label class="label">Horário</label>
+            <div class="time-selector">
+              <select id="scheduleHour" class="input">
+                <option value="">Hora</option>
+              </select>
+              <span class="time-separator">:</span>
+              <select id="scheduleMinute" class="input">
+                <option value="">Minuto</option>
+              </select>
+              <select id="scheduleAmPm" class="input">
+                <option value="AM">AM</option>
+                <option value="PM">PM</option>
+              </select>
+            </div>
+          </div>
+          <div class="stack">
+            <label class="label">Ativo</label>
+            <label class="switch">
+              <input type="checkbox" id="scheduleEnabled" checked />
+              <span class="slider"></span>
+            </label>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button id="saveSchedule" class="btn">Salvar</button>
+          <button id="cancelSchedule" class="btn btn-secondary">Cancelar</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal para Cena -->
+    <div id="sceneModal" class="modal" style="display: none;">
+      <div class="modal-overlay"></div>
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3>Nova Cena</h3>
+          <button id="closeSceneModal" class="modal-close">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="stack">
+            <label class="label">Nome da Cena</label>
+            <input id="sceneName" type="text" class="input" placeholder="Ex: Cinema, Festa, Trabalho" />
+          </div>
+          <div class="stack">
+            <label class="label">Dispositivos</label>
+            <div id="sceneDevices" class="scene-devices"></div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button id="saveScene" class="btn">Salvar</button>
+          <button id="cancelScene" class="btn btn-secondary">Cancelar</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal para seletor de cores - Fora do painel para aparecer sobre toda a tela -->
+    <div id="colorPickerModal" class="color-picker-modal" style="display: none;">
+      <div class="color-picker-overlay"></div>
+      <div class="color-picker-content">
+        <div class="color-picker-header">
+          <h3>Escolher Cor</h3>
+          <button id="closeColorPicker" class="color-picker-close">&times;</button>
+        </div>
+        <div class="color-picker-body">
+          <input id="ledColorModal" type="color" class="color-picker-input" value="#FFFFFF" />
+          <div class="color-picker-hex">
+            <span id="colorHexValue">#FFFFFF</span>
+          </div>
+        </div>
+        <div class="color-picker-footer">
+          <button id="applyColor" class="btn">Aplicar</button>
+          <button id="cancelColor" class="btn btn--secondary">Cancelar</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal para login necessário -->
+    <div id="loginRequiredModal" class="modal" style="display: none;">
+      <div class="modal-overlay"></div>
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3>Acesso Restrito</h3>
+          <button id="closeLoginRequiredModal" class="modal-close">&times;</button>
+        </div>
+        <div class="modal-body">
+          <p style="color: var(--text); margin: 0; line-height: 1.6;">Você precisa fazer login para acessar a área de Automação.</p>
+        </div>
+        <div class="modal-footer">
+          <button id="goToLogin" class="btn">Fazer Login</button>
+          <button id="cancelLoginRequired" class="btn btn-secondary">Cancelar</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal para dispositivo bloqueado -->
+    <div id="deviceBlockedModal" class="modal" style="display: none;">
+      <div class="modal-overlay"></div>
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3>Dispositivo Bloqueado</h3>
+          <button id="closeDeviceBlockedModal" class="modal-close">&times;</button>
+        </div>
+        <div class="modal-body">
+          <p id="deviceBlockedMessage" style="color: var(--text); margin: 0; line-height: 1.6;"></p>
+        </div>
+        <div class="modal-footer">
+          <button id="closeDeviceBlockedBtn" class="btn">Entendi</button>
+        </div>
+      </div>
+    </div>
+
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
+  <script src="script.js"></script>
+</body>
+
+</html>
+
+
