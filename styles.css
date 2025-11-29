@@ -158,8 +158,65 @@ code{background:#0b0f15;color:#cbd5e1;padding:2px 6px;border-radius:6px}
   .color-picker-footer .btn{width:100%}
 }
 
-@media (prefers-reduced-motion: reduce){
-  *{animation-duration:.001ms !important;animation-iteration-count:1 !important;transition-duration:.001ms !important;scroll-behavior:auto !important}
+/* Forçar centralização do modal e estilo da paleta */
+#colorPickerModal {
+  position: fixed;
+  inset: 0;
+  display: flex; /* sempre flex para centralizar */
+  align-items: center;
+  justify-content: center;
+  z-index: 1200;
+  font-family: inherit;
+}
+
+#colorPickerModal .color-picker-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0,0,0,0.55);
+  backdrop-filter: blur(4px);
+}
+
+/* Conteúdo */
+#colorPickerModal .color-picker-content { max-width: 420px; width: 94%; }
+
+/* Paleta de cores (grid) */
+.color-swatches {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 10px;
+  width: 100%;
+  justify-items: center;
+  margin-bottom: 6px;
+}
+.color-swatch {
+  width: 44px;
+  height: 44px;
+  border-radius: 8px;
+  border: 3px solid rgba(255,255,255,0.06);
+  box-shadow: 0 4px 10px rgba(0,0,0,0.35);
+  cursor: pointer;
+  transition: transform .08s ease, box-shadow .12s ease;
+}
+.color-swatch:hover { transform: translateY(-4px); box-shadow: 0 8px 18px rgba(0,0,0,0.45); }
+.color-swatch.selected {
+  outline: 3px solid rgba(255,255,255,0.9);
+  transform: scale(1.05);
+}
+
+/* Hex label */
+.color-picker-hex #colorHexValue {
+  display: inline-block;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-weight: 600;
+  margin-top: 6px;
+  background: rgba(255,255,255,0.06);
+}
+
+/* Ajustes mobile */
+@media (max-width:420px) {
+  .color-swatches { grid-template-columns: repeat(4,1fr); gap:8px; }
+  .color-swatch { width: 40px; height: 40px; }
 }
 
 /* Página de Login */
@@ -209,3 +266,24 @@ code{background:#0b0f15;color:#cbd5e1;padding:2px 6px;border-radius:6px}
 .system-bar-fill.high{background:linear-gradient(90deg,#ef4444,#dc2626)}
 .system-footer{margin-top:8px;padding-top:12px;border-top:1px solid var(--border)}
 .system-update{font-size:11px;color:var(--muted);font-style:italic}
+
+/* Centraliza o modal do seletor de cor e estilo do picker */
+#colorPickerModal {
+  position: fixed;
+  inset: 0;
+  display: flex; /* sempre flex para centralizar */
+  align-items: center;
+  justify-content: center;
+  z-index: 1200;
+  font-family: inherit;
+}
+
+#colorPickerModal .color-picker-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0,0,0,0.55);
+  backdrop-filter: blur(4px);
+}
+
+/* Conteúdo */
+#colorPickerModal .color-picker-content { max-width: 420px; width: 94%; }

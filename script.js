@@ -86,7 +86,22 @@ const state = {
     temp: 0,
     ssd: 0,
     lastUpdate: null
-  }
+  },
+  audio: {
+    isActive: false,
+    stream: null,
+    analyser: null,
+    dataArray: null,
+    animationId: null,
+    sensitivity: 50,
+    baseColor: '#FFFFFF',
+    lastBrightness: 128,
+    lastUpdateTime: 0,
+    brightnessHistory: [],
+    lastDynamicColor: '#FFFFFF',
+    speed: 1 // NOVO: velocidade do modo áudio (1 = normal, >1 = mais rápido)
+  },
+  lastDeviceStates: {} // NOVO: guarda estado canônico para evitar logs duplicados
 };
 
 // MQTT Client
@@ -159,19 +174,30 @@ function connect() {
         if (j.mode) {
           el('ledMode').value = j.mode;
           el('ledModeState').textContent = j.mode;
+          // Atualizar preview para mostrar/ocultar controles de áudio
+          updatePreview();
         }
         if (j.color) {
           el('ledColor').value = j.color;
           el('ledColorState').textContent = j.color.toUpperCase();
           const sw = el('ledSwatch');
           if (sw) sw.style.background = j.color;
+          // Atualizar cor base do modo áudio se aplicável
+          if (j.mode === 'audio') {
+            state.audio.baseColor = j.color;
+            el('audioColor').value = j.color;
+            el('audioColorVal').textContent = j.color.toUpperCase();
+          }
         }
         if (typeof j.brightness === 'number') {
           el('ledBri').value = j.brightness;
           el('briVal').textContent = j.brightness;
           el('ledBriState').textContent = j.brightness;
         }
-        logDeviceChange('fita_led', JSON.stringify(j), 'fisico');
+        // Não logar quando estiver em modo áudio (para evitar spam nos logs)
+        if (j.mode !== 'audio') {
+          logDeviceChange('fita_led', JSON.stringify(j), 'fisico');
+        }
       } catch (_) {}
     } else if (topic.startsWith(`${TOPIC_BASE}/switch/`)) {
       // Processar estado dos switches físicos
@@ -369,8 +395,35 @@ const deviceNames = {
   'fita_led': 'Fita LED'
 };
 
+// Normaliza estados para comparação e evitar logs duplicados
+function normalizeStateForCompare(device, value) {
+  try {
+    // Se for JSON string ou objeto, parse e produza JSON canônico
+    const obj = typeof value === 'string' && value.trim().startsWith('{') ? JSON.parse(value) : (typeof value === 'object' && value !== null ? value : null);
+    if (obj) {
+      if (device === 'fita_led') {
+        // canonical LED state: mode, color (upper), brightness (number)
+        const normalized = {
+          mode: obj.mode || obj.m || 'off',
+          color: (obj.color || obj.c || '#FFFFFF').toString().toUpperCase(),
+          brightness: typeof obj.brightness === 'number' ? obj.brightness : (typeof obj.bri === 'number' ? obj.bri : (typeof obj.b === 'number' ? obj.b : 0))
+        };
+        return JSON.stringify(normalized);
+      }
+      // para outros objetos, ordenar chaves
+      const ordered = {};
+      Object.keys(obj).sort().forEach(k => ordered[k] = obj[k]);
+      return JSON.stringify(ordered);
+    }
+  } catch (e) {
+    // continua para fallback
+  }
+  // fallback para primitivos
+  return String(value);
+}
+
 // Publicar mensagem MQTT
-function publish(topic, payload, source = 'web', deviceName = null) {
+function publish(topic, payload, source = 'web', deviceName = null, skipLog = false) {
   if (!client) {
     console.error('MQTT client não inicializado');
     return false;
@@ -403,6 +456,9 @@ function publish(topic, payload, source = 'web', deviceName = null) {
       console.error(`Falha ao publicar: ${topic} - buffer cheio ou desconectado`);
       return false;
     }
+    
+    // NOTE: retirar log automático daqui para evitar duplicação.
+    // Chamadores devem registrar log explicitamente quando necessário.
     
     return true;
   } catch (error) {
@@ -773,12 +829,21 @@ function updateBlockDeviceStatus() {
 function logDeviceChange(device, deviceState, source) {
   if (!state.auth.isAuthenticated) return;
   
+  // Normalizar estado para comparar com último salvo e evitar duplicatas
+  const normalized = normalizeStateForCompare(device, deviceState);
+  if (state.lastDeviceStates[device] !== undefined && state.lastDeviceStates[device] === normalized) {
+    // mesmo estado já logado — ignorar
+    return;
+  }
+  // atualizar último estado conhecido
+  state.lastDeviceStates[device] = normalized;
+  
   const now = new Date();
   const logEntry = {
     device: device,
     state: deviceState,
-    source: source, // 'web' ou 'fisico'
-    userType: state.auth.userType || 'sistema', // 'master' ou 'user'
+    source: source || 'web',
+    userType: state.auth.userType || 'sistema',
     timestamp: now.toISOString(),
     date: String(now.getDate()).padStart(2, '0') + '/' + String(now.getMonth() + 1).padStart(2, '0'),
     hour: String(now.getHours()).padStart(2, '0'),
@@ -1356,7 +1421,7 @@ function checkSchedules() {
   const now = new Date();
   const currentDay = now.getDay();
   const currentDate = now.toISOString().split('T')[0]; // YYYY-MM-DD
-  const currentTime = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
+  const currentTime = now.getHours() * 60 + now.getMinutes(); // minutos desde meia-noite
   
   Object.entries(schedules).forEach(([id, schedule]) => {
     if (!schedule.enabled) return;
@@ -1907,6 +1972,7 @@ window.addEventListener('DOMContentLoaded', () => {
     }
   });
   
+  
   el('btnGenerateKey').addEventListener('click', () => {
     const type = el('keyType').value;
     generateTemporaryKey(type).then(key => {
@@ -2095,10 +2161,38 @@ window.addEventListener('DOMContentLoaded', () => {
   }
   
   function applyColor() {
-    const selectedColor = colorInputModal.value;
-    colorInput.value = selectedColor;
+    // Proteções contra elementos ausentes
+    const selectedRaw = (colorInputModal && colorInputModal.value) || (colorInput && colorInput.value) || '#FFFFFF';
+    let selected = String(selectedRaw).trim().toUpperCase();
+    if (!selected.startsWith('#')) selected = `#${selected}`;
+    // Atualizar inputs / UI
+    if (colorInput) colorInput.value = selected;
+    if (colorHexValue) colorHexValue.textContent = selected;
+    const sw = el('ledSwatch');
+    if (sw) sw.style.background = selected;
+    if (el('ledColorState')) el('ledColorState').textContent = selected;
     updatePreview();
     closeColorPicker();
+
+    // Se o modo atual for sólido, enviar comando imediatamente para a fita
+    const mode = el('ledMode')?.value || 'solid';
+    if (mode === 'solid') {
+      const bri = Number(el('ledBri')?.value || 128);
+      const payload = JSON.stringify({
+        mode: 'solid',
+        color: selected,
+        brightness: bri
+      });
+      if (publish(T.ledSet, payload, 'web', 'fita_led')) {
+        // Atualizar estados locais após publicação
+        if (el('ledModeState')) el('ledModeState').textContent = 'solid';
+        if (el('ledBriState')) el('ledBriState').textContent = String(bri);
+        logDeviceChange('fita_led', payload, 'web');
+      }
+    } else {
+      // somente atualizar preview UI
+      updateLedPreviewUI();
+    }
   }
   
   // Tornar o preview clicável para abrir seletor de cores
@@ -2140,29 +2234,101 @@ window.addEventListener('DOMContentLoaded', () => {
   
   // Atualizar preview quando o modo mudar
   el('ledMode').addEventListener('change', () => {
+    const mode = el('ledMode').value;
+    const audioControls = el('audioModeControls');
+    
+    // Mostrar/ocultar controles de áudio
+    if (mode === 'audio') {
+      audioControls.style.display = 'block';
+    } else {
+      audioControls.style.display = 'none';
+      // Parar captura de áudio se estiver ativa
+      if (state.audio.isActive) {
+        stopAudioCapture();
+      }
+    }
+    
     updatePreview();
   });
   
+  // Event listeners para controles de áudio
+  el('btnAudioStart').addEventListener('click', startAudioCapture);
+  el('btnAudioStop').addEventListener('click', stopAudioCapture);
+  
+  // Sensibilidade de áudio
+  el('audioSensitivity').addEventListener('input', (e) => {
+    const val = e.target.value;
+    el('sensitivityVal').textContent = val;
+    state.audio.sensitivity = parseInt(val);
+  });
+  
+  // Cor base do modo áudio
+  el('audioColor').addEventListener('input', (e) => {
+    const color = e.target.value;
+    el('audioColorVal').textContent = color.toUpperCase();
+    state.audio.baseColor = color;
+    
+    // Atualizar LED imediatamente se estiver em modo áudio ativo
+    if (state.audio.isActive && state.audio.lastBrightness) {
+      const payload = JSON.stringify({
+        mode: 'audio',
+        color: color.toUpperCase(),
+        brightness: state.audio.lastBrightness
+      });
+      publish(T.ledSet, payload, 'web', 'fita_led');
+    }
+  });
+  
   el('btnLedSend').addEventListener('click', () => {
+    const mode = el('ledMode').value;
+    
+    // Se modo for áudio, apenas mostra instruções
+    if (mode === 'audio') {
+      alert('Para ativar o modo Áudio, clique no botão "🎤 Ativar Microfone" nos controles de áudio.');
+      return;
+    }
+    
     const payload = JSON.stringify({
-      mode: el('ledMode').value,
+      mode: mode,
       color: el('ledColor').value.toUpperCase(),
       brightness: Number(el('ledBri').value),
     });
     if (publish(T.ledSet, payload, 'web', 'fita_led')) {
-    el('ledModeState').textContent = el('ledMode').value;
-    el('ledColorState').textContent = el('ledColor').value.toUpperCase();
-    const sw = el('ledSwatch');
-    if (sw) sw.style.background = el('ledColor').value;
-    el('ledBriState').textContent = String(Number(el('ledBri').value));
-    updatePreview();
-      logDeviceChange('fita_led', payload, 'web');
+      el('ledModeState').textContent = mode;
+      el('ledColorState').textContent = el('ledColor').value.toUpperCase();
+      const sw = el('ledSwatch');
+      if (sw) sw.style.background = el('ledColor').value;
+      el('ledBriState').textContent = String(Number(el('ledBri').value));
+      updatePreview();
     }
   });
 
   // Animação de partículas
   initParticles();
   updatePreview();
+  
+  // Inicializar valores padrão do modo áudio
+  if (el('audioSensitivity')) {
+    state.audio.sensitivity = parseInt(el('audioSensitivity').value || 50);
+  }
+  if (el('audioColor')) {
+    state.audio.baseColor = el('audioColor').value || '#FFFFFF';
+    el('audioColorVal').textContent = (el('audioColor').value || '#FFFFFF').toUpperCase();
+  }
+  
+  // Parar captura de áudio quando a página for fechada
+  window.addEventListener('beforeunload', () => {
+    if (state.audio.isActive) {
+      stopAudioCapture();
+    }
+  });
+  
+  // Parar captura de áudio quando perder foco na aba
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden && state.audio.isActive) {
+      // Não parar, apenas pausar visualmente se necessário
+    }
+  });
   
   // Atualizar timestamp dos dados do sistema a cada segundo
   setInterval(() => {
@@ -2247,9 +2413,20 @@ function updatePreview(){
   const mode = el('ledMode')?.value || 'solid';
   const color = (el('ledColor')?.value || '#FFFFFF').toUpperCase();
   const b = Number(el('ledBri')?.value || 128) / 255;
+  
+  // Mostrar/ocultar controles de áudio baseado no modo
+  const audioControls = el('audioModeControls');
+  if (audioControls) {
+    audioControls.style.display = mode === 'audio' ? 'block' : 'none';
+  }
+  
   if (mode === 'rainbow'){
     bar.style.background = 'linear-gradient(90deg, red, orange, yellow, green, cyan, blue, violet)';
     bar.style.opacity = Math.max(0.15, b).toString();
+  } else if (mode === 'audio') {
+    const audioColor = state.audio.baseColor || '#FFFFFF';
+    bar.style.background = audioColor;
+    bar.style.opacity = state.audio.isActive ? '0.8' : '0.3';
   } else if (mode === 'off' || b === 0){
     bar.style.background = '#000000';
     bar.style.opacity = '0.2';
@@ -2297,3 +2474,450 @@ function updateSystemDataDisplay() {
     }
   }
 }
+
+// Sistema de Áudio para Fita LED
+async function startAudioCapture() {
+  try {
+    // Solicitar permissão e obter stream de áudio
+    const stream = await navigator.mediaDevices.getUserMedia({ 
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true
+      } 
+    });
+    
+    state.audio.stream = stream;
+    
+    // Criar contexto de áudio
+    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    const source = audioContext.createMediaStreamSource(stream);
+    
+    // Criar analisador
+    const analyser = audioContext.createAnalyser();
+    analyser.fftSize = 256;
+    analyser.smoothingTimeConstant = 0.8;
+    
+    source.connect(analyser);
+    
+    state.audio.analyser = analyser;
+    state.audio.dataArray = new Uint8Array(analyser.frequencyBinCount);
+    state.audio.isActive = true;
+    state.audio.brightnessHistory = [];
+    state.audio.lastUpdateTime = 0;
+    state.audio.lastBrightness = 128;
+    
+    // Atualizar UI
+    el('btnAudioStart').style.display = 'none';
+    el('btnAudioStop').style.display = 'inline-block';
+    el('audioStatus').textContent = '🎤 Microfone ativo';
+    el('audioStatus').style.color = 'var(--ok)';
+    el('audioStatus').style.display = 'block';
+    el('audioVisualizer').style.display = 'block';
+    
+    // Iniciar processamento de áudio
+    processAudio();
+    
+  } catch (error) {
+    console.error('Erro ao acessar microfone:', error);
+    el('audioStatus').textContent = '❌ Erro ao acessar microfone. Verifique as permissões.';
+    el('audioStatus').style.color = 'var(--bad)';
+    el('audioStatus').style.display = 'block';
+  }
+}
+
+function stopAudioCapture() {
+  if (state.audio.stream) {
+    state.audio.stream.getTracks().forEach(track => track.stop());
+    state.audio.stream = null;
+  }
+  
+  if (state.audio.animationId) {
+    cancelAnimationFrame(state.audio.animationId);
+    state.audio.animationId = null;
+  }
+  
+  state.audio.isActive = false;
+  state.audio.analyser = null;
+  state.audio.dataArray = null;
+  
+  // Atualizar UI
+  el('btnAudioStart').style.display = 'inline-block';
+  el('btnAudioStop').style.display = 'none';
+  el('audioStatus').textContent = 'Microfone desativado';
+  el('audioStatus').style.color = 'var(--muted)';
+  el('audioVisualizer').style.display = 'none';
+  el('audioLevelBar').style.width = '0%';
+  
+  // Voltar LED para modo sólido com brilho padrão
+  const ledColor = el('ledColor')?.value || '#FFFFFF';
+  const ledBrightness = parseInt(el('ledBri')?.value || 128);
+  const payload = JSON.stringify({
+    mode: 'solid',
+    color: ledColor.toUpperCase(),
+    brightness: ledBrightness
+  });
+  publish(T.ledSet, payload, 'web', 'fita_led');
+}
+
+// Função para gerar cor baseada em frequências
+function getColorFromFrequency(dataArray, sampleRate = 44100) {
+  // Dividir frequências em bandas: graves, médios, agudos
+  const bassRange = Math.floor(dataArray.length * 0.1); // Primeiros 10% (graves)
+  const midRange = Math.floor(dataArray.length * 0.5); // 10-50% (médios)
+  const highRange = dataArray.length; // Resto (agudos)
+  
+  let bassSum = 0, midSum = 0, highSum = 0;
+  
+  // Calcular energia em cada banda
+  for (let i = 0; i < bassRange; i++) {
+    bassSum += dataArray[i];
+  }
+  for (let i = bassRange; i < midRange; i++) {
+    midSum += dataArray[i];
+  }
+  for (let i = midRange; i < highRange; i++) {
+    highSum += dataArray[i];
+  }
+  
+  const bassLevel = bassSum / bassRange;
+  const midLevel = midSum / (midRange - bassRange);
+  const highLevel = highSum / (highRange - midRange);
+  
+  // Normalizar para 0-255
+  const maxPossible = 255;
+  const r = Math.min(255, Math.floor(bassLevel * 2)); // Vermelho para graves
+  const g = Math.min(255, Math.floor(midLevel * 2));  // Verde para médios
+  const b = Math.min(255, Math.floor(highLevel * 2)); // Azul para agudos
+  
+  // Converter para hex
+  const toHex = (n) => n.toString(16).padStart(2, '0');
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+}
+
+function processAudio() {
+  if (!state.audio.isActive || !state.audio.analyser) return;
+  
+  // Obter dados de frequência
+  state.audio.analyser.getByteFrequencyData(state.audio.dataArray);
+  
+  // Calcular pico de áudio para detectar batida
+  let max = 0;
+  for (let i = 0; i < state.audio.dataArray.length; i++) {
+    if (state.audio.dataArray[i] > max) {
+      max = state.audio.dataArray[i];
+    }
+  }
+  
+  // Normalizar (0-255 para 0-100)
+  const normalizedLevel = (max / 255) * 100;
+  const sensitivity = state.audio.sensitivity || 50;
+  const adjustedLevel = (normalizedLevel * sensitivity) / 50;
+  
+  // Detectar "batida"
+  const beatThreshold = 40; // ajuste se quiser mais/menos sensível
+  const isBeat = adjustedLevel > beatThreshold;
+  
+  // Atualizar visualizador UI
+  const levelPercent = Math.min(100, adjustedLevel);
+  const levelBar = el('audioLevelBar');
+  if (levelBar) {
+    levelBar.style.width = `${levelPercent}%`;
+    // cor do visualizador segue cor dinâmica atual
+    levelBar.style.background = state.audio.lastDynamicColor || '#FFFFFF';
+  }
+  
+  // Função utilitária: gerar cor aleatória
+  const randColor = () => {
+    const r = Math.floor(Math.random() * 256);
+    const g = Math.floor(Math.random() * 256);
+    const b = Math.floor(Math.random() * 256);
+    const toHex = (n) => n.toString(16).padStart(2, '0');
+    return `#${toHex(r)}${toHex(g)}${toHex(b)}`.toUpperCase();
+  };
+  
+  // Lógica de piscar 255 / 0 (alternando a cada batida)
+  let newBrightness = 0;
+  let newColor = state.audio.lastDynamicColor || randColor();
+  
+  if (isBeat) {
+    // Em batida: acende (255) e escolhe cor aleatória nova
+    newBrightness = 255;
+    newColor = randColor();
+  } else {
+    // Fora de batida: apaga (0)
+    newBrightness = 0;
+    // manter a cor anterior (ouixa) para o visual local
+  }
+  
+  // Controlar taxa de publicação pela velocidade
+  const now = Date.now();
+  const timeSinceLast = now - (state.audio.lastUpdateTime || 0);
+  const speed = state.audio.speed || 1;
+  const minUpdateInterval = Math.max(40, Math.floor(200 / speed)); // menor intervalo para maior velocidade
+  
+  // Só publicar se houver mudança real (evita spam)
+  const brightnessChanged = newBrightness !== state.audio.lastBrightness;
+  const colorChanged = newColor !== state.audio.lastDynamicColor;
+  
+  if ((brightnessChanged || colorChanged) && timeSinceLast >= minUpdateInterval) {
+    const payload = JSON.stringify({
+      mode: 'audio',
+      color: newColor,
+      brightness: newBrightness
+    });
+    // Não registrar logs para cada frame de áudio
+    publish(T.ledSet, payload, 'web', 'fita_led', true);
+    
+    state.audio.lastBrightness = newBrightness;
+    state.audio.lastDynamicColor = newColor;
+    state.audio.lastUpdateTime = now;
+  }
+  
+  // Continuar loop
+  state.audio.animationId = requestAnimationFrame(processAudio);
+}
+
+// Atualiza visual do preview da fita e mostra controles conforme modo
+function updateLedPreviewUI() {
+  const preview = el('ledPreview');
+  const mode = el('ledMode')?.value || state.led?.mode || 'off';
+  const bri = Number(el('ledBri')?.value ?? state.led?.brightness ?? 128);
+  const color = (el('ledColor')?.value || state.led?.color || '#FFFFFF').toUpperCase();
+
+  // Atualiza estados visíveis
+  if (el('ledModeState')) el('ledModeState').textContent = mode;
+  if (el('ledBriState')) el('ledBriState').textContent = String(bri);
+  if (el('ledColorState')) el('ledColorState').textContent = color;
+  const sw = el('ledSwatch');
+  if (sw) sw.style.background = color;
+
+  // Mostrar/ocultar controles de áudio quando aplicável
+  const audioControls = el('audioModeControls');
+  if (audioControls) {
+    audioControls.style.display = mode === 'audio' ? '' : 'none';
+    if (mode === 'audio') {
+      // Exibir visualizador
+      const audioViz = el('audioVisualizer');
+      if (audioViz) audioViz.style.display = '';
+    } else {
+      const audioViz = el('audioVisualizer');
+      if (audioViz) audioViz.style.display = 'none';
+    }
+  }
+
+  // Atualizar aparência do preview conforme modo
+  if (preview) {
+    if (mode === 'solid') {
+      preview.style.background = color;
+    } else if (mode === 'rainbow') {
+      preview.style.background = 'linear-gradient(90deg,#ff0000,#ff9900,#ffff00,#00ff00,#00ffff,#0000ff,#9900ff)';
+    } else if (mode === 'audio') {
+      preview.style.background = 'repeating-linear-gradient(90deg,#222,#111 10%)';
+    } else { // off
+      preview.style.background = '#0b0f15';
+    }
+  }
+}
+
+// Envia comando para fita a partir da UI (botão Aplicar ou mudança de modo)
+function sendLedFromUI(skipLogForAudio = false) {
+  const mode = el('ledMode')?.value || 'solid';
+  const bri = Number(el('ledBri')?.value || 128);
+  const rawColor = (el('ledColor')?.value || '#FFFFFF').toString().toUpperCase();
+  const color = rawColor.startsWith('#') ? rawColor : `#${rawColor}`;
+
+  let payloadObj;
+  if (mode === 'solid') {
+    payloadObj = { mode: 'solid', color: color, brightness: bri };
+  } else if (mode === 'rainbow') {
+    // Rainbow geralmente só precisa do modo e brilho
+    payloadObj = { mode: 'rainbow', brightness: bri };
+  } else if (mode === 'audio') {
+    // Ao trocar para audio, parar qualquer estado anterior e ativar modo audio
+    payloadObj = { mode: 'audio' };
+  } else { // off
+    payloadObj = { mode: 'off' };
+  }
+
+  const payload = JSON.stringify(payloadObj);
+  const ok = publish(T.ledSet, payload, 'web', 'fita_led', mode === 'audio'); // skipLog true para áudio contínuo
+  if (ok) {
+    // Atualiza estado local e UI
+    state.led = Object.assign({}, state.led, payloadObj);
+    if (mode !== 'audio') {
+      // Logar mudanças explícitas de modo/estado (audio trata-se de fluxo)
+      logDeviceChange('fita_led', payload, 'web');
+    } else if (!skipLogForAudio) {
+      logDeviceChange('fita_led', payload, 'web');
+    }
+    updateLedPreviewUI();
+  } else {
+    console.error('Falha ao enviar comando para fita LED');
+  }
+}
+
+// Inicialização dos listeners relacionados à fita LED
+function initLedControls() {
+  // Quando trocar modo na UI, só atualizar preview - não publicar automaticamente,
+  // o usuário deve clicar "Aplicar" (btnLedSend). Isso evita envios indesejados.
+  const ledModeEl = el('ledMode');
+  if (ledModeEl) {
+    ledModeEl.addEventListener('change', () => {
+      updateLedPreviewUI();
+    });
+  }
+
+  // Ao mudar brilho, atualizar preview valor e UI
+  const briEl = el('ledBri');
+  if (briEl) {
+    briEl.addEventListener('input', (e) => {
+      const v = e.target.value;
+      if (el('briVal')) el('briVal').textContent = v;
+      if (el('ledBriState')) el('ledBriState').textContent = v;
+      updateLedPreviewUI();
+    });
+  }
+
+  // Botão aplicar envia o comando correto para o modo atual
+  const btnApply = el('btnLedSend');
+  if (btnApply) {
+    btnApply.addEventListener('click', () => sendLedFromUI());
+  }
+
+  // Click no preview abre seletor de cor apenas no modo 'solid'
+  const preview = el('ledPreview');
+  if (preview) {
+    preview.addEventListener('click', () => {
+      const mode = el('ledMode')?.value || 'solid';
+      if (mode === 'solid') {
+        // Abrir modal de cor
+        const modal = el('colorPickerModal');
+        if (modal) modal.style.display = '';
+      }
+    });
+  }
+
+  // Fechar/aplicar color picker já devem existir (applyColor/cancel handlers).
+  // Sincroniza cor escondida se houver input color direto
+  const ledColorEl = el('ledColor');
+  if (ledColorEl) {
+    ledColorEl.addEventListener('input', (e) => {
+      const c = e.target.value.toUpperCase();
+      if (el('ledColorState')) el('ledColorState').textContent = c;
+      if (el('ledSwatch')) el('ledSwatch').style.background = c;
+      updateLedPreviewUI();
+    });
+  }
+
+  // Inicializar preview com estado atual
+  updateLedPreviewUI();
+}
+
+// Inicializa paleta de cores centralizada e handlers do modal
+window.addEventListener('DOMContentLoaded', () => {
+  const modal = el('colorPickerModal');
+  const swatchesContainer = el('colorSwatches');
+  const colorInput = el('ledColorModal');
+  const colorHex = el('colorHexValue');
+  const applyBtn = el('applyColor');
+  const cancelBtn = el('cancelColor');
+  let selectedColor = (el('ledColor')?.value || '#FFFFFF').toUpperCase();
+
+  // Paleta padrão — adicione/ajuste cores conforme necessário
+  const presetColors = [
+    '#FF0000','#FF7F00','#FFFF00','#7FFF00','#00FF00','#00FF7F',
+    '#00FFFF','#007FFF','#0000FF','#7F00FF','#FF00FF','#FF007F',
+    '#FFFFFF','#FFD700','#FFA500','#FFC0CB','#800000','#008080'
+  ];
+
+  // popula swatches
+  if (swatchesContainer) {
+    swatchesContainer.innerHTML = '';
+    presetColors.forEach(c => {
+      const d = document.createElement('button');
+      d.type = 'button';
+      d.className = 'color-swatch';
+      d.style.background = c;
+      d.setAttribute('data-color', c);
+      d.setAttribute('aria-label', `Cor ${c}`);
+      d.addEventListener('click', () => {
+        // limpar seleção anterior
+        const prev = swatchesContainer.querySelector('.color-swatch.selected');
+        if (prev) prev.classList.remove('selected');
+        d.classList.add('selected');
+        selectedColor = c.toUpperCase();
+        if (colorHex) { colorHex.textContent = selectedColor; colorHex.style.background = selectedColor; colorHex.style.color = getContrastColor(selectedColor); }
+        if (colorInput) colorInput.value = selectedColor;
+      });
+      swatchesContainer.appendChild(d);
+    });
+    // selecionar cor inicial
+    const first = swatchesContainer.querySelector(`[data-color="${selectedColor}"]`);
+    (first || swatchesContainer.firstChild)?.classList.add('selected');
+    if (colorHex) { colorHex.textContent = selectedColor; colorHex.style.background = selectedColor; colorHex.style.color = getContrastColor(selectedColor); }
+    if (colorInput) colorInput.value = selectedColor;
+  }
+
+  // fallback: se usar input color (ex.: acessibilidade)
+  if (colorInput) {
+    colorInput.addEventListener('input', (e) => {
+      const c = (e.target.value || '#FFFFFF').toUpperCase();
+      selectedColor = c;
+      // marcar correspondência na paleta se existir
+      const match = swatchesContainer?.querySelector(`[data-color="${c}"]`);
+      if (match) {
+        swatchesContainer.querySelectorAll('.color-swatch.selected').forEach(s=>s.classList.remove('selected'));
+        match.classList.add('selected');
+      }
+      if (colorHex) { colorHex.textContent = c; colorHex.style.background = c; colorHex.style.color = getContrastColor(c); }
+    });
+  }
+
+  // Aplicar cor selecionada (reaproveita applyColor já existente se preferir)
+  if (applyBtn) {
+    applyBtn.addEventListener('click', () => {
+      // proteger caso não exista função applyColor anterior
+      const colorToUse = selectedColor || '#FFFFFF';
+      // Atualiza inputs/preview e envia comando se estiver em modo sólido
+      if (el('ledColor')) el('ledColor').value = colorToUse;
+      if (el('colorHexValue')) {
+        el('colorHexValue').textContent = colorToUse;
+        el('colorHexValue').style.background = colorToUse;
+        el('colorHexValue').style.color = getContrastColor(colorToUse);
+      }
+      // fechar modal
+      if (modal) modal.style.display = 'none';
+      // enviar comando como modo sólido caso seja o ativo
+      const mode = el('ledMode')?.value || 'solid';
+      if (mode === 'solid') {
+        const bri = Number(el('ledBri')?.value || 128);
+        const payload = JSON.stringify({ mode: 'solid', color: colorToUse, brightness: bri });
+        if (publish(T.ledSet, payload, 'web', 'fita_led')) {
+          state.led = Object.assign({}, state.led, { mode: 'solid', color: colorToUse, brightness: bri });
+          if (el('ledModeState')) el('ledModeState').textContent = 'solid';
+          if (el('ledColorState')) el('ledColorState').textContent = colorToUse;
+          if (el('ledSwatch')) el('ledSwatch').style.background = colorToUse;
+          if (el('ledBriState')) el('ledBriState').textContent = String(bri);
+          logDeviceChange('fita_led', JSON.stringify({mode:'solid', color: colorToUse, brightness: bri}), 'web');
+        }
+      } else {
+        // somente atualizar preview UI
+        updateLedPreviewUI();
+      }
+    });
+  }
+
+  if (cancelBtn) {
+    cancelBtn.addEventListener('click', () => { if (modal) modal.style.display = 'none'; });
+  }
+
+  // helper contraste
+  function getContrastColor(hex) {
+    try {
+      const r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
+      const yiq = (r*299 + g*587 + b*114)/1000;
+      return yiq >= 128 ? '#000' : '#FFF';
+    } catch (e) { return '#FFF'; }
+  }
+});

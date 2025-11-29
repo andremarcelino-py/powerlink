@@ -41,6 +41,7 @@
         <div class="login-brand">
           <img src="logopowerlink.png" alt="Power Link" class="login-logo" onerror="this.style.display='none'" />
           <h1 class="login-title">Power Link</h1>
+          <p class="login-subtitle">Pronto para Transformar sua Casa?</p>
         </div>
         <div class="login-panel">
           <div class="login-panel-body">
@@ -170,8 +171,27 @@
             <select id="ledMode" class="input">
               <option value="solid">Sólido</option>
               <option value="rainbow">Arco-íris</option>
+              <option value="audio">Áudio (Microfone)</option>
               <option value="off">Desligado</option>
             </select>
+          </div>
+          <div id="audioModeControls" class="stack" style="display: none;">
+            <label class="label">Controle de Áudio</label>
+            <div class="control-row">
+              <button id="btnAudioStart" class="btn">🎤 Ativar Microfone</button>
+              <button id="btnAudioStop" class="btn btn--secondary" style="display: none;">Parar</button>
+            </div>
+            <div id="audioStatus" class="state" style="display: none;"></div>
+            <div id="audioVisualizer" style="margin-top: 12px; display: none;">
+              <div class="label">Nível de Áudio:</div>
+              <div style="width: 100%; height: 30px; background: #0b0f15; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; position: relative;">
+                <div id="audioLevelBar" style="height: 100%; width: 0%; background: linear-gradient(90deg, #10b981, #f59e0b, #ef4444); transition: width 0.1s ease;"></div>
+              </div>
+            </div>
+            <div class="stack" style="margin-top: 12px;">
+              <label class="label">Sensibilidade: <span id="sensitivityVal">50</span>%</label>
+              <input id="audioSensitivity" type="range" min="1" max="100" value="50" />
+            </div>
           </div>
           <input id="ledColor" type="color" style="display: none;" value="#FFFFFF" />
           <div class="stack">
@@ -495,7 +515,11 @@
           <button id="closeColorPicker" class="color-picker-close">&times;</button>
         </div>
         <div class="color-picker-body">
-          <input id="ledColorModal" type="color" class="color-picker-input" value="#FFFFFF" />
+          <div id="colorSwatches" class="color-swatches" role="list" aria-label="Paleta de cores">
+            <!-- swatches preenchidos via JS -->
+          </div>
+          <!-- fallback / acessibilidade -->
+          <input id="ledColorModal" type="color" class="color-picker-input" value="#FFFFFF" style="display:none" />
           <div class="color-picker-hex">
             <span id="colorHexValue">#FFFFFF</span>
           </div>
